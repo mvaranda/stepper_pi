@@ -2,11 +2,14 @@
 #include <linux/kernel.h>    /* printk() */
 #include <linux/errno.h>     /* error codes */
 #include <linux/module.h>  /* THIS_MODULE */
+#include <linux/device.h>         // Header to support the kernel Driver Model
 #include <linux/cdev.h>      /* char device stuff */
 #include <linux/init.h>       /* module_init, module_exit */
 #include <linux/module.h> /* version info, MODULE_LICENSE, MODULE_AUTHOR, printk() */
 #include <linux/compiler.h> /* __must_check */
 #include <linux/uaccess.h>
+
+#define PROMPT "stepper_drv was open %d times\n"
 
 __must_check int register_device(void); /* 0 if Ok*/
 
@@ -15,9 +18,27 @@ void  unregister_device(void);
 MODULE_LICENSE("Apache-2.0");
 MODULE_AUTHOR("Marcelo Varanda");
 
+static int   nOpenTimes = 0;
+static char  prompt[64];
+static int   prompt_len = 0;
+static int   numberOpens = 0;
 
-static const char    g_s_Hello_World_string[] = "Hello world from kernel mode!\n\0";
-static const ssize_t g_s_Hello_World_size = sizeof(g_s_Hello_World_string);
+static int device_open(struct inode *inodep, struct file *file_ptr){
+   if (numberOpens != 0) {
+     printk( KERN_NOTICE "stepper_drv: file already open");
+     return -EBUSY;
+   }
+   printk( KERN_NOTICE "stepper_drv: device open fine");
+   numberOpens++;
+   return 0;
+}
+
+static int     device_close(struct inode *inodep, struct file *file_ptr)
+{
+   printk( KERN_NOTICE "stepper_drv: device close fine");
+   numberOpens = 0;
+   return 0;
+}
 
 /*=======================================================================*/
 static ssize_t device_file_read(
@@ -30,13 +51,15 @@ static ssize_t device_file_read(
             , (int)*possition
             , (unsigned int)count );
 
-   if( *possition >= g_s_Hello_World_size )
+   if( *possition >= prompt_len )
       return 0;
 
-   if( *possition + count > g_s_Hello_World_size )
-      count = g_s_Hello_World_size - *possition;
+   prompt_len = sprintf(prompt, PROMPT, nOpenTimes++);
 
-   if( copy_to_user(user_buffer, g_s_Hello_World_string + *possition, count) != 0 )
+   if( *possition + count > prompt_len )
+      count = prompt_len - *possition;
+
+   if( copy_to_user(user_buffer, prompt + *possition, count) != 0 )
       return -EFAULT;   
 
    *possition += count;
@@ -47,6 +70,8 @@ static struct file_operations simple_driver_fops =
 {
    .owner   = THIS_MODULE,
    .read    = device_file_read,
+   .open    = device_open,
+   .release = device_close,
 };
 
 static int device_file_major_number = 0;
@@ -71,6 +96,7 @@ int register_device(void)
       printk( KERN_NOTICE "stepper_drv: registered character device with major number = %i and minor numbers 0...255"
                   , device_file_major_number );
 
+      prompt_len = sprintf(prompt, PROMPT, nOpenTimes++);
       return 0;
 }
 /*--------------------------------------------------------------------------*/
