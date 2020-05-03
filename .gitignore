@@ -30,3 +30,11 @@
 *.exe
 *.out
 *.app
+
+#kernel
+drive/*.o.cmd
+drive/*.symvers
+drive/*.order
+drive/*.ko
+drive/*.mod.c
+drive/*.ko.cmd
