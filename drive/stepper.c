@@ -1,13 +1,40 @@
-#include <linux/fs.h> 	     /* file stuff */
-#include <linux/kernel.h>    /* printk() */
-#include <linux/errno.h>     /* error codes */
+#include <linux/fs.h>      /* file stuff */
+#include <linux/kernel.h>  /* printk() */
+#include <linux/errno.h>   /* error codes */
 #include <linux/module.h>  /* THIS_MODULE */
-#include <linux/device.h>         // Header to support the kernel Driver Model
-#include <linux/cdev.h>      /* char device stuff */
-#include <linux/init.h>       /* module_init, module_exit */
-#include <linux/module.h> /* version info, MODULE_LICENSE, MODULE_AUTHOR, printk() */
+#include <linux/device.h>  /* Header to support the kernel Driver Model */
+#include <linux/cdev.h>    /* char device stuff */
+#include <linux/init.h>    /* module_init, module_exit */
+#include <linux/module.h>  /* version info, MODULE_LICENSE, MODULE_AUTHOR, printk() */
 #include <linux/compiler.h> /* __must_check */
 #include <linux/uaccess.h>
+#include <linux/timer.h>
+#include <linux/jiffies.h>
+
+// sudo mknod /dev/stepper c 240 1
+// 1 seconds = 102 jiffies
+
+static void timer_handler(struct timer_list * timerlist);
+static unsigned long tm = 1000;
+static unsigned long tm_counter;
+
+DEFINE_TIMER(mTimer, timer_handler);
+
+static void setTimer(unsigned long ms)
+{
+   mod_timer(&mTimer, jiffies + msecs_to_jiffies(ms));
+}
+
+static void timer_handler(struct timer_list * timerlist)
+{
+  unsigned long j = jiffies;
+  if (tm_counter == 0) return;
+  
+  printk( KERN_NOTICE "timer_handler expired at %u jiffies\n", (unsigned)j);
+  setTimer(tm);
+  //mod_timer(&mTimer, jiffies + tm);
+  tm_counter--;
+}
 
 #define PROMPT "stepper_drv was open %d times\n"
 
@@ -30,6 +57,13 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
    }
    printk( KERN_NOTICE "stepper_drv: device open fine");
    numberOpens++;
+   
+   tm = 1000;
+
+   //mod_timer(&mTimer, jiffies + tm);
+   setTimer(tm);
+   tm_counter = 5;
+
    return 0;
 }
 
@@ -37,6 +71,7 @@ static int     device_close(struct inode *inodep, struct file *file_ptr)
 {
    printk( KERN_NOTICE "stepper_drv: device close fine");
    numberOpens = 0;
+   //tm_counter = 0;
    return 0;
 }
 
@@ -102,6 +137,8 @@ int register_device(void)
 /*--------------------------------------------------------------------------*/
 void unregister_device(void)
 {
+   del_timer(&mTimer);
+   
    printk( KERN_NOTICE "stepper_drv: unregister_device() is called" );
    if(device_file_major_number != 0)
    {
