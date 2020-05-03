@@ -10,9 +10,43 @@
 #include <linux/uaccess.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
+#include <linux/ioport.h>
 
 // sudo mknod /dev/stepper c 240 1
 // 1 seconds = 102 jiffies
+// Pinout web: https://pinout.xyz/pinout/1_wire#
+//
+// BOT:  BCM0  - Connector 27 - WiringPi 30 
+//    GPFSEL0 bits 2,1,0    Linux addr: 0x20200000 (real addr 0x7E200000)
+//    GPLEV0  bit 0         Linux addr: 0x20200034 (real addr 0x7E200034)
+//
+// EOT:  BCM5  - Connector 29 - WiringPi 21
+//    GPFSEL0 bits 17,16,15 Linux addr: 0x20200000 (real addr 0x7E200000)
+//    GPLEV0  bit 5         Linux addr: 0x20200034 (real addr 0x7E200034)
+//
+// dir:  BCM6  - Connector 31 - WiringPi 22
+//    GPFSEL0 bits 20,19,18 Linux addr: 0x20200000 (real addr 0x7E200000)
+//    GPSET0  bit 6         Linux addr: 0x2020001c (real addr 0x7E20001C)
+//    GPCLR0  bit 6         Linux addr: 0x20200028 (real addr 0x7E200028)
+#define DIR_SEL_ADDR 0x20200000
+#define DIR_SEL_VAL (1 << 18) // 001 << 18
+#define DIR_SET_ADDR 0x2020001c
+#define DIR_CLR_ADDR 0x20200028
+#define DIR_BIT (1 << 6)
+//
+// step: BCM13 - Connector 33 - WiringPi 23
+//    GPFSEL1 bits 11,10,9  Linux addr: 0x20200004 (real addr 0x7E200004)
+//    GPSET0  bit 13        Linux addr: 0x2020001c (real addr 0x7E20001C)
+//    GPCLR0  bit 13        Linux addr: 0x20200028 (real addr 0x7E200028)
+//
+#define STEP_SEL_ADDR 0x20200004
+#define STEP_SEL_VAL (1 << 9) // 001 << 9
+#define STEP_SET_ADDR 0x2020001c
+#define STEP_CLR_ADDR 0x20200028
+#define STEP_BIT (1 << 13)
+
+#define  PORT  0x20200000
+#define  RANGE   0x40
 
 static void timer_handler(struct timer_list * timerlist);
 static unsigned long tm = 1000;
@@ -32,11 +66,12 @@ static void timer_handler(struct timer_list * timerlist)
   
   printk( KERN_NOTICE "timer_handler expired at %u jiffies\n", (unsigned)j);
   setTimer(tm);
-  //mod_timer(&mTimer, jiffies + tm);
   tm_counter--;
 }
 
 #define PROMPT "stepper_drv was open %d times\n"
+
+static const char DEVICE_NAME[] = "stepper_drv";
 
 __must_check int register_device(void); /* 0 if Ok*/
 
@@ -55,12 +90,17 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
      printk( KERN_NOTICE "stepper_drv: file already open");
      return -EBUSY;
    }
+
+   if (request_mem_region(PORT, RANGE, DEVICE_NAME)) {
+     printk( KERN_NOTICE "stepper_drv: could not reserve I/O area");
+     return -EBUSY;
+   }
+
    printk( KERN_NOTICE "stepper_drv: device open fine");
    numberOpens++;
    
    tm = 1000;
 
-   //mod_timer(&mTimer, jiffies + tm);
    setTimer(tm);
    tm_counter = 5;
 
@@ -71,7 +111,6 @@ static int     device_close(struct inode *inodep, struct file *file_ptr)
 {
    printk( KERN_NOTICE "stepper_drv: device close fine");
    numberOpens = 0;
-   //tm_counter = 0;
    return 0;
 }
 
@@ -111,7 +150,6 @@ static struct file_operations simple_driver_fops =
 
 static int device_file_major_number = 0;
 
-static const char device_name[] = "stepper_drv";
 
 /*========================================================================*/
 int register_device(void)
@@ -120,7 +158,7 @@ int register_device(void)
 
       printk( KERN_NOTICE "stepper_drv: register_device() is called." );
 
-      result = register_chrdev( 0, device_name, &simple_driver_fops );
+      result = register_chrdev( 0, DEVICE_NAME, &simple_driver_fops );
       if( result < 0 )
       {
          printk( KERN_WARNING "stepper_drv:  can\'t register character device with errorcode = %i", result );
@@ -142,7 +180,7 @@ void unregister_device(void)
    printk( KERN_NOTICE "stepper_drv: unregister_device() is called" );
    if(device_file_major_number != 0)
    {
-      unregister_chrdev(device_file_major_number, device_name);
+      unregister_chrdev(device_file_major_number, DEVICE_NAME);
    }
 }
 
