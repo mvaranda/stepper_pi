@@ -11,6 +11,7 @@
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 #include <linux/ioport.h>
+#include <asm/io.h>
 
 // sudo mknod /dev/stepper c 240 1
 // 1 seconds = 102 jiffies
@@ -28,10 +29,10 @@
 //    GPFSEL0 bits 20,19,18 Linux addr: 0x20200000 (real addr 0x7E200000)
 //    GPSET0  bit 6         Linux addr: 0x2020001c (real addr 0x7E20001C)
 //    GPCLR0  bit 6         Linux addr: 0x20200028 (real addr 0x7E200028)
-#define DIR_SEL_ADDR 0x20200000
+#define DIR_SEL_OFSET 0
 #define DIR_SEL_VAL (1 << 18) // 001 << 18
-#define DIR_SET_ADDR 0x2020001c
-#define DIR_CLR_ADDR 0x20200028
+#define DIR_SET_OFFSET 0x1c
+#define DIR_CLR_OFFSET 0x28
 #define DIR_BIT (1 << 6)
 //
 // step: BCM13 - Connector 33 - WiringPi 23
@@ -39,17 +40,17 @@
 //    GPSET0  bit 13        Linux addr: 0x2020001c (real addr 0x7E20001C)
 //    GPCLR0  bit 13        Linux addr: 0x20200028 (real addr 0x7E200028)
 //
-#define STEP_SEL_ADDR 0x20200004
+#define STEP_SEL_OFFSET 0x04
 #define STEP_SEL_VAL (1 << 9) // 001 << 9
-#define STEP_SET_ADDR 0x2020001c
-#define STEP_CLR_ADDR 0x20200028
+#define STEP_SET_OFFSET 0x1c
+#define STEP_CLR_OFFSET 0x28
 #define STEP_BIT (1 << 13)
 
 #define  PORT  0x20200000
 #define  RANGE   0x40
 
 static void timer_handler(struct timer_list * timerlist);
-static unsigned long tm = 1000;
+static unsigned long tm = 10;
 static unsigned long tm_counter;
 
 DEFINE_TIMER(mTimer, timer_handler);
@@ -83,9 +84,13 @@ MODULE_AUTHOR("Marcelo Varanda");
 static int   nOpenTimes = 0;
 static char  prompt[64];
 static int   prompt_len = 0;
+static void * io_base_addr;
 static int   numberOpens = 0;
+static int   phase = 0;
 
 static int device_open(struct inode *inodep, struct file *file_ptr){
+   unsigned char d;
+
    if (numberOpens != 0) {
      printk( KERN_NOTICE "stepper_drv: file already open");
      return -EBUSY;
@@ -96,13 +101,24 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
      return -EBUSY;
    }
 
+   //----- set STEP and DIR as outputs
+   io_base_addr = ioremap(PORT, RANGE);
+   d = readl(io_base_addr + STEP_SEL_OFFSET);
+   d |= STEP_SEL_VAL;
+   writel(d, io_base_addr + STEP_SEL_OFFSET);
+
+   writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
+//#define STEP_SET_OFFSET 0x1c
+//#define STEP_CLR_OFFSET 0x28
+//#define STEP_BIT (1 << 13)
+
    printk( KERN_NOTICE "stepper_drv: device open fine");
    numberOpens++;
    
    tm = 1000;
 
    setTimer(tm);
-   tm_counter = 5;
+   tm_counter = 100;
 
    return 0;
 }
@@ -111,6 +127,7 @@ static int     device_close(struct inode *inodep, struct file *file_ptr)
 {
    printk( KERN_NOTICE "stepper_drv: device close fine");
    numberOpens = 0;
+   release_mem_region(PORT, RANGE);
    return 0;
 }
 
@@ -137,6 +154,12 @@ static ssize_t device_file_read(
       return -EFAULT;   
 
    *possition += count;
+   if (phase++ & 1) {
+     writel(STEP_BIT, io_base_addr + STEP_SET_OFFSET);  
+   }
+   else {
+     writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
+   }
    return count;
 }
 /*==========================================================================*/
