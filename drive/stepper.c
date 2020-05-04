@@ -55,41 +55,6 @@ static unsigned long tm_counter;
 
 DEFINE_TIMER(mTimer, timer_handler);
 
-static void setTimer(unsigned long ms)
-{
-   mod_timer(&mTimer, jiffies + msecs_to_jiffies(ms));
-}
-
-static void timer_handler(struct timer_list * timerlist)
-{
-  unsigned long j = jiffies;
-  if (tm_counter == 0) return;
-  
-   if (request_mem_region(PORT, RANGE, DEVICE_NAME)) {
-     printk( KERN_NOTICE "stepper_drv: could not reserve I/O area");
-     return;
-   }
-
-   //----- set STEP and DIR as outputs
-   if (io_base_addr = ioremap(PORT, RANGE) == NULL) {
-     printk( KERN_NOTICE "stepper_drv: ioremap fail");
-     release_mem_region(PORT, RANGE);
-     return;
-   }
-   if (phase++ & 1) {
-     writel(STEP_BIT, io_base_addr + STEP_SET_OFFSET);  
-   }
-   else {
-     writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
-   }
-
-   release_mem_region(PORT, RANGE);
-
-   printk( KERN_NOTICE "timer_handler expired at %u jiffies\n", (unsigned)j);
-  setTimer(tm);
-  tm_counter--;
-}
-
 #define PROMPT "stepper_drv was open %d times\n"
 
 static const char DEVICE_NAME[] = "stepper_drv";
@@ -108,6 +73,41 @@ static void * io_base_addr;
 static int   numberOpens = 0;
 static int   phase = 0;
 
+static void setTimer(unsigned long ms)
+{
+   mod_timer(&mTimer, jiffies + msecs_to_jiffies(ms));
+}
+
+static void timer_handler(struct timer_list * timerlist)
+{
+  unsigned long j = jiffies;
+  if (tm_counter == 0) return;
+  
+   if (request_mem_region(PORT, RANGE, DEVICE_NAME)) {
+     printk( KERN_NOTICE "stepper_drv: could not reserve I/O area");
+     return;
+   }
+
+   //----- set STEP and DIR as outputs
+   if ((io_base_addr = ioremap(PORT, RANGE)) == NULL) {
+     printk( KERN_NOTICE "stepper_drv: ioremap fail");
+     release_mem_region(PORT, RANGE);
+     return;
+   }
+   if (phase++ & 1) {
+     writel(STEP_BIT, io_base_addr + STEP_SET_OFFSET);  
+   }
+   else {
+     writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
+   }
+
+   release_mem_region(PORT, RANGE);
+
+   printk( KERN_NOTICE "timer_handler expired at %u jiffies\n", (unsigned)j);
+  setTimer(tm);
+  tm_counter--;
+}
+
 static int device_open(struct inode *inodep, struct file *file_ptr){
    unsigned char d;
 
@@ -122,7 +122,7 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
    }
 
    //----- set STEP and DIR as outputs
-   if (io_base_addr = ioremap(PORT, RANGE) == NULL) {
+   if ((io_base_addr = ioremap(PORT, RANGE)) == NULL) {
      printk( KERN_NOTICE "stepper_drv: ioremap fail");
      release_mem_region(PORT, RANGE);
      return -EBUSY;
