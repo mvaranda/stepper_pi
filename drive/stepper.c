@@ -13,6 +13,7 @@
 #include <linux/ioport.h>
 #include <asm/io.h>
 
+
 // sudo mknod /dev/stepper c 240 1
 // 1 seconds = 102 jiffies
 // Pinout web: https://pinout.xyz/pinout/1_wire#
@@ -46,8 +47,17 @@
 #define STEP_CLR_OFFSET 0x28
 #define STEP_BIT (1 << 13)
 
-//#define  PORT  0x20200000  // Raspberry whatever
-#define  PORT  0xff200000  // Raspberry PI 3B - see: cat /proc/iomem
+
+#define RPI3
+//---------------- platform ----------------
+#if defined ( RPI2 ) || defined (RPI3)
+#define BCM2835_PERI_BASE		0x3F000000	///<
+#else
+#define BCM2835_PERI_BASE		0x20000000	///<
+#endif
+#define BCM2835_GPIO_BASE		(BCM2835_PERI_BASE + 0x200000)
+
+#define  PORT BCM2835_GPIO_BASE  // Raspberry PI 3B - see: cat /proc/iomem
 #define  RANGE   0x40
 
 #define NUM_PULSES 10
