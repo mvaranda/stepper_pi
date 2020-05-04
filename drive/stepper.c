@@ -46,12 +46,16 @@
 #define STEP_CLR_OFFSET 0x28
 #define STEP_BIT (1 << 13)
 
-#define  PORT  0x20200000
+//#define  PORT  0x20200000  // Raspberry whatever
+#define  PORT  0xff200000  // Raspberry PI 3B - see: cat /proc/iomem
 #define  RANGE   0x40
 
+#define NUM_PULSES 10
+#define TM	100       // 10 milliseconds
+
 static void timer_handler(struct timer_list * timerlist);
-static unsigned long tm = 10;
-static unsigned long tm_counter;
+static unsigned long tm = TM;
+static unsigned long tm_counter = NUM_PULSES;
 
 DEFINE_TIMER(mTimer, timer_handler);
 
@@ -75,22 +79,29 @@ static int   phase = 0;
 
 static void setTimer(unsigned long ms)
 {
-   mod_timer(&mTimer, jiffies + msecs_to_jiffies(ms));
+  int ret;
+  ret = mod_timer(&mTimer, jiffies + msecs_to_jiffies(ms));
+  printk( KERN_NOTICE "stepper_drv: mod_timer ret = %d", ret);
+  
 }
 
 static void timer_handler(struct timer_list * timerlist)
 {
   unsigned long j = jiffies;
-  if (tm_counter == 0) return;
+  printk( KERN_NOTICE "stepper_drv: timer_handler");
+  if (tm_counter == 0) {
+     printk( KERN_NOTICE "stepper_drv: tm_counter = 0");
+    return;
+  }
   
-   if (request_mem_region(PORT, RANGE, DEVICE_NAME)) {
-     printk( KERN_NOTICE "stepper_drv: could not reserve I/O area");
+   if (request_mem_region(PORT, RANGE, DEVICE_NAME) == NULL) {
+     printk( KERN_NOTICE "stepper_drv (timer): could not reserve I/O area");
      return;
    }
 
    //----- set STEP and DIR as outputs
    if ((io_base_addr = ioremap(PORT, RANGE)) == NULL) {
-     printk( KERN_NOTICE "stepper_drv: ioremap fail");
+     printk( KERN_NOTICE "stepper_drv (timer): ioremap fail");
      release_mem_region(PORT, RANGE);
      return;
    }
@@ -116,8 +127,8 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
      return -EBUSY;
    }
 
-   if (request_mem_region(PORT, RANGE, DEVICE_NAME)) {
-     printk( KERN_NOTICE "stepper_drv: could not reserve I/O area");
+   if (request_mem_region(PORT, RANGE, DEVICE_NAME) == NULL) {
+     printk( KERN_NOTICE "stepper_drv (open): could not reserve I/O area");
      return -EBUSY;
    }
 
@@ -127,24 +138,18 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
      release_mem_region(PORT, RANGE);
      return -EBUSY;
    }
+   printk( KERN_NOTICE "stepper_drv: config I/O pins");
    d = readl(io_base_addr + STEP_SEL_OFFSET);
    d |= STEP_SEL_VAL;
    writel(d, io_base_addr + STEP_SEL_OFFSET);
 
    writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
-//#define STEP_SET_OFFSET 0x1c
-//#define STEP_CLR_OFFSET 0x28
-//#define STEP_BIT (1 << 13)
 
    release_mem_region(PORT, RANGE);
 
    printk( KERN_NOTICE "stepper_drv: device open fine");
    numberOpens++;
    
-   tm = 1000;
-
-   setTimer(tm);
-   tm_counter = 100;
 
    return 0;
 }
@@ -177,6 +182,9 @@ static ssize_t device_file_read(
 
    if( copy_to_user(user_buffer, prompt + *possition, count) != 0 )
       return -EFAULT;   
+
+   setTimer(TM);
+   tm_counter = NUM_PULSES;
 
    *possition += count;
   return count;
