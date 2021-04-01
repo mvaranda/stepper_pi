@@ -70,7 +70,7 @@
 #define RPI3
 //---------------- platform ----------------
 #if defined ( RPI2 ) || defined (RPI3)
-#define BCM2835_PERI_BASE		0x20000000 // 0x7E and F2 freezes	///<
+#define BCM2835_PERI_BASE		0x3f000000 // 0x7E and F2 freezes	///<
 #else
 #define BCM2835_PERI_BASE		0x20000000	///<
 #endif
@@ -150,11 +150,12 @@ static void timer_handler(struct timer_list * timerlist)
     return;
   }
   
-  pending = 0;
-  printk( KERN_NOTICE "stepper_drv: GOOD SO FAR\n");
-  return;
-#else
-   if (request_mem_region(PORT, RANGE, DEVICE_NAME) == NULL) {
+//  pending = 0;
+//  printk( KERN_NOTICE "stepper_drv: GOOD SO FAR\n");
+//  return;
+//#else
+
+  if (request_mem_region(PORT, RANGE, DEVICE_NAME) == NULL) {
      printk( KERN_NOTICE "stepper_drv (timer): could not reserve I/O area\n");
      pending = 0;
      return;
@@ -165,10 +166,10 @@ static void timer_handler(struct timer_list * timerlist)
   pending = 0;
   printk( KERN_NOTICE "stepper_drv: GOOD SO FAR\n");
   return;
-//#else
+#else
   //----- set STEP and DIR as outputs
    if ((io_base_addr = ioremap(PORT, RANGE)) == NULL) {
-     printk( KERN_NOTICE "stepper_drv (timer): ioremap fail");
+     printk( KERN_NOTICE "stepper_drv (timer): ioremap fail\n");
      release_mem_region(PORT, RANGE);
      return;
    }
