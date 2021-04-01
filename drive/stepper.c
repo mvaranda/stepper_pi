@@ -112,7 +112,7 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Marcelo Varanda");
 MODULE_DESCRIPTION("A RPI stepper motor driver");  ///< The description -- see modinfo
 MODULE_VERSION("0.1");
-#define  CLASS_NAME  "stepper_class"
+#define  CLASS_NAME  "stepper"
 
 static int   nOpenTimes = 0;
 static int   nRegTimes = 0;
