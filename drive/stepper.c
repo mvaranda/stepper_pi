@@ -70,7 +70,7 @@
 #define RPI3
 //---------------- platform ----------------
 #if defined ( RPI2 ) || defined (RPI3)
-#define BCM2835_PERI_BASE		0x3F000000	///<
+#define BCM2835_PERI_BASE		0x20000000 // 0x7E and F2 freezes	///<
 #else
 #define BCM2835_PERI_BASE		0x20000000	///<
 #endif
@@ -83,32 +83,57 @@
 #define TM	100       // 10 milliseconds
 
 static void timer_handler(struct timer_list * timerlist);
+
+
 static unsigned long tm = TM;
 static unsigned long tm_counter = NUM_PULSES;
 
 DEFINE_TIMER(mTimer, timer_handler);
 
-#define PROMPT "stepper_drv was open %d times\n"
+static int    majorNumber;                  ///< Stores the device number -- determined automatically
+static char   message[256] = {0};           ///< Memory for the string that is passed from userspace
+static short  size_of_message;              ///< Used to remember the size of the string stored
+static int    numberOpens = 0;              ///< Counts the number of times the device is opened
+static struct class*  stepperCharClass  = NULL; ///< The device-driver class struct pointer
+static struct device* stepperCharDevice = NULL; ///< The device-driver device struct pointer
 
-static const char DEVICE_NAME[] = "stepper_drv";
+
+#define PROMPT "stepper_drv was open %d times\n"
+#define PROMPT2 "stepper_drv was reg %d times\n"
+
+static const char DEVICE_NAME[] = "stepper";
 
 __must_check int register_device(void); /* 0 if Ok*/
 
 void  unregister_device(void); 
 
-MODULE_LICENSE("Apache-2.0");
+//MODULE_LICENSE("Apache-2.0");
+MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Marcelo Varanda");
+MODULE_DESCRIPTION("A RPI stepper motor driver");  ///< The description -- see modinfo
+MODULE_VERSION("0.1");
+#define  CLASS_NAME  "stepper_class"
 
 static int   nOpenTimes = 0;
+static int   nRegTimes = 0;
 static char  prompt[64];
 static int   prompt_len = 0;
 static void * io_base_addr;
-static int   numberOpens = 0;
+// static int   numberOpens = 0;
 static int   phase = 0;
+static int   pending = 0;
 
 static void setTimer(unsigned long ms)
 {
   int ret;
+#if 0
+  init_timer(&mTimer);
+  mTimer.function = myfunc;
+  mTimer.data = 0;
+  mTimer.expires = (unsigned long)(jiffies + HZ/2);
+  add_timer(&mTimer);
+  printk("Timer Started\r\n");
+#endif
   ret = mod_timer(&mTimer, jiffies + msecs_to_jiffies(ms));
   printk( KERN_NOTICE "stepper_drv: mod_timer ret = %d", ret);
   
@@ -116,36 +141,51 @@ static void setTimer(unsigned long ms)
 
 static void timer_handler(struct timer_list * timerlist)
 {
+#if 1 
   unsigned long j = jiffies;
-  printk( KERN_NOTICE "stepper_drv: timer_handler");
+  printk( KERN_NOTICE "stepper_drv: timer_handler\n");
   if (tm_counter == 0) {
-     printk( KERN_NOTICE "stepper_drv: tm_counter = 0");
+     printk( KERN_NOTICE "stepper_drv: tm_counter = 0\n");
+     pending = 0;
     return;
   }
   
+  pending = 0;
+  printk( KERN_NOTICE "stepper_drv: GOOD SO FAR\n");
+  return;
+#else
    if (request_mem_region(PORT, RANGE, DEVICE_NAME) == NULL) {
-     printk( KERN_NOTICE "stepper_drv (timer): could not reserve I/O area");
+     printk( KERN_NOTICE "stepper_drv (timer): could not reserve I/O area\n");
+     pending = 0;
      return;
    }
+   release_mem_region(PORT, RANGE);
 
-   //----- set STEP and DIR as outputs
+
+  pending = 0;
+  printk( KERN_NOTICE "stepper_drv: GOOD SO FAR\n");
+  return;
+//#else
+  //----- set STEP and DIR as outputs
    if ((io_base_addr = ioremap(PORT, RANGE)) == NULL) {
      printk( KERN_NOTICE "stepper_drv (timer): ioremap fail");
      release_mem_region(PORT, RANGE);
      return;
    }
    if (phase++ & 1) {
-     writel(STEP_BIT, io_base_addr + STEP_SET_OFFSET);  
+     // writel(STEP_BIT, io_base_addr + STEP_SET_OFFSET);  
    }
    else {
-     writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
+     // writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
    }
 
    release_mem_region(PORT, RANGE);
 
    printk( KERN_NOTICE "timer_handler expired at %u jiffies\n", (unsigned)j);
-  setTimer(tm);
+  // setTimer(tm);
   tm_counter--;
+  pending = 0;
+#endif
 }
 
 static int device_open(struct inode *inodep, struct file *file_ptr){
@@ -156,6 +196,7 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
      return -EBUSY;
    }
 
+#if 0
    if (request_mem_region(PORT, RANGE, DEVICE_NAME) == NULL) {
      printk( KERN_NOTICE "stepper_drv (open): could not reserve I/O area");
      return -EBUSY;
@@ -175,6 +216,7 @@ static int device_open(struct inode *inodep, struct file *file_ptr){
    writel(STEP_BIT, io_base_addr + STEP_CLR_OFFSET);  
 
    release_mem_region(PORT, RANGE);
+#endif
 
    printk( KERN_NOTICE "stepper_drv: device open fine");
    numberOpens++;
@@ -201,6 +243,11 @@ static ssize_t device_file_read(
             , (int)*possition
             , (unsigned int)count );
 
+   if (pending) {
+	printk( KERN_NOTICE "stepper_drv: pending timer, ret zero");
+	return 0;
+   }
+
    if( *possition >= prompt_len )
       return 0;
 
@@ -212,6 +259,7 @@ static ssize_t device_file_read(
    if( copy_to_user(user_buffer, prompt + *possition, count) != 0 )
       return -EFAULT;   
 
+   pending = 1;
    setTimer(TM);
    tm_counter = NUM_PULSES;
 
@@ -236,7 +284,35 @@ int register_device(void)
       int result = 0;
 
       printk( KERN_NOTICE "stepper_drv: register_device() is called." );
+#if 1
+   // Try to dynamically allocate a major number for the device -- more difficult but worth it
+   majorNumber = register_chrdev(0, DEVICE_NAME, &simple_driver_fops);
+   if (majorNumber<0){
+      printk(KERN_ALERT "stepper_drv failed to register a major number\n");
+      return majorNumber;
+   }
+   printk(KERN_INFO "stepper_drv: registered correctly with major number %d\n", majorNumber);
+ 
+   // Register the device class
+   stepperCharClass = class_create(THIS_MODULE, CLASS_NAME);
+   if (IS_ERR(stepperCharClass)){                // Check for error and clean up if there is
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      printk(KERN_ALERT "Failed to register device class\n");
+      return PTR_ERR(stepperCharClass);          // Correct way to return an error on a pointer
+   }
+   printk(KERN_INFO "stepper_drv: device class registered correctly\n");
+ 
+   // Register the device driver
+   stepperCharDevice = device_create(stepperCharClass, NULL, MKDEV(majorNumber, 0), NULL, DEVICE_NAME);
+   if (IS_ERR(stepperCharDevice)){               // Clean up if there is an error
+      class_destroy(stepperCharClass);           // Repeated code but the alternative is goto statements
+      unregister_chrdev(majorNumber, DEVICE_NAME);
+      printk(KERN_ALERT "Failed to create the device\n");
+      return PTR_ERR(stepperCharDevice);
+   }
+   printk(KERN_INFO "stepper_drv: device class created correctly\n"); // Made it! device was initialized
 
+#else
       result = register_chrdev( 0, DEVICE_NAME, &simple_driver_fops );
       if( result < 0 )
       {
@@ -247,20 +323,27 @@ int register_device(void)
       device_file_major_number = result;
       printk( KERN_NOTICE "stepper_drv: registered character device with major number = %i and minor numbers 0...255"
                   , device_file_major_number );
-
-      prompt_len = sprintf(prompt, PROMPT, nOpenTimes++);
+#endif
+      prompt_len = sprintf(prompt, PROMPT2, nRegTimes++);
       return 0;
 }
 /*--------------------------------------------------------------------------*/
 void unregister_device(void)
 {
    del_timer(&mTimer);
-   
+
+   device_destroy(stepperCharClass, MKDEV(majorNumber, 0));     // remove the device
+   class_unregister(stepperCharClass);                          // unregister the device class
+   class_destroy(stepperCharClass);                             // remove the device class
+   unregister_chrdev(majorNumber, DEVICE_NAME);             // unregister the major number
+#if 0
    printk( KERN_NOTICE "stepper_drv: unregister_device() is called" );
    if(device_file_major_number != 0)
    {
       unregister_chrdev(device_file_major_number, DEVICE_NAME);
    }
+#endif
+   nRegTimes--;
 }
 
 /*==========================================================================*/
