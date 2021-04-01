@@ -21,6 +21,7 @@ clean:
 
 load:
 	insmod ./$(TARGET_MODULE).ko
+	sudo chmod 666 /dev/stepper
 
 unload:
 	rmmod ./$(TARGET_MODULE).ko
